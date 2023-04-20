@@ -1,1 +1,1 @@
-python train_biencoder.py --batch_size 10 --epoch 5 --output_path output --debug True
+python train_biencoder.py --batch_size 32 --epoch 100 --output_path output  --data_parallel True --n_gpu 3 --debug True

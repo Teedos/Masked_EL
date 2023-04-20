@@ -68,8 +68,11 @@ def get_context_representation(sample, tokenizer, max_length = 512):
     
 
 
-def get_candidate_representation(sample, tokenizer, max_length = 30):  ### from entity_dictionary
+def get_candidate_representation(sample, tokenizer, max_length = 25):  ### from entity_dictionary
     candidate_tokens = tokenizer.tokenize(sample.lower())
+    if len(candidate_tokens)>max_length:
+        candidate_tokens = candidate_tokens[:max_length]
+        
     input_ids = tokenizer.convert_tokens_to_ids(candidate_tokens)
     padding = [0] * (max_length - len(input_ids))
     input_ids += padding
@@ -127,43 +130,19 @@ def process_mention_data(samples, tokenizer, id_to_idx, debug = False, max_lengt
 
     return processed_samples, tensor_data
 
-def process_candidate_data(model, entity_dictionary,debug=False, max_length=30):
-    model = model.cuda()
-    # processed_samples = []
-    # for sample in samples:
-    #     candidate = get_candidate_representation(sample, tokenizer)
-    #     record = {
-    #         "candidate": sample['mention'],
-    #         "candidate_tokens": candidate['tokens'],
-    #         "candidate_ids": candidate['ids'],
-    #         "label_id": sample['mention_id']
-    #         "label_idxs": id_to_idx[sample['mention_id']]
-    #     }
-    #     processed_samples.append(record)
-    #     candidate_tensors = torch.tensor(
-    #         select_field(processed_samples, "candidate_ids"), dtype=torch.long
-    #     )
-
-    #     label_idxs = torch.tensor(
-    #     select_field(processed_samples, "label_idxs"), dtype=torch.long,
-    #     )
-    #     tensor_data = TensorDataset(candidate_tensors, label_idxs)
-
-    # if debug:
-    #     entity_dictionary = entity_dictionary[:100]
+def process_candidate_data(model, device,  entity_dictionary,debug=False, max_length=50):
     ent_embs = [] 
+    
     with torch.no_grad():
         for idx, ent in enumerate(tqdm(entity_dictionary, desc = "calculating embeddings")):
             input = torch.tensor(ent['ids'])
             #print(input.shape)
-            _, emb = model(candidate_ids = input[None,:].cuda() )
+            _, emb = model(candidate_ids = input[None,:].to(device) )
             
-            #emb = emb[0].mean(1).squeeze(0).cpu()
-            ent_embs.append(emb)
+            ent_embs.append(emb.cpu())
 
     ent_embs = torch.stack(ent_embs)
     print(ent_embs.shape)
-    #ent_embs,_ = model(ent_ids)
     d = 768
     res = faiss.StandardGpuResources()
     index_flat = faiss.IndexFlatL2(d)
@@ -185,11 +164,9 @@ def process_candidate_data(model, entity_dictionary,debug=False, max_length=30):
             for elem in row:
                 if elem != idx:
                     to_append.append(elem)
-                if len(to_append)  == 64 :
+                if len(to_append)  == top_k-1 :
                     break
-            #print(len(to_append))
             neighbor_list.append(to_append)
-            
-            
+    
     return ent_embs, neighbor_list
 

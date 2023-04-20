@@ -38,7 +38,7 @@ def main(params):
 
     num_train_epochs = params['epoch']
 
-    ent_embs, neighbor_list = process_candidate_data(model, entity_dictionary, params["debug"])
+    ent_embs, neighbor_list = process_candidate_data(model, device, entity_dictionary, params["debug"])
 
     entity_dictionary_pkl_path = './processed/entity_dictionary.pkl'
     
@@ -54,48 +54,51 @@ def main(params):
                                 protocol=pickle.HIGHEST_PROTOCOL)
     
     np.save('./processed/neighbor_list.npy', neighbor_list)
-    model.cuda()
-    
+    #model = model
+    steps = 0
     for epoch_idx in trange(int(num_train_epochs), desc="Epoch"):
         model.train()
         torch.cuda.empty_cache()
         tr_loss = 0
-        #print("epoch: ", epoch_idx)
-        for step, batch in enumerate(train_dataloader):
-            
+        for step, batch in enumerate(tqdm(train_dataloader, desc = "Processing batches")):
+            optimizer.zero_grad()
             batch = tuple(t.to(device) for t in batch)
             context_ids, label_idxs = batch    
-               
-            #### Need to add negative samples, can take the top 64 most similar to the candidate
-            #### Target needs to be [1, 0, 0, 0, 0, 0, 0, 0]  target needs to be of length = 64
-            #print("shape of ids: ", context_ids.shape)
+            
             candidate_ids = []
-            #print(len(label_idxs))
+            
             for idx in label_idxs:
                 candidate_ids.append([])
-                # if neighbor_list[idx][0] != idx:
-                #     print("something is wrong") 
-                # else:
-                #     print("correct")
+      
                 for neighbor in neighbor_list[idx]:
-                    #print(neighbor)
-                    
+   
                     candidate_ids[-1].append(entity_dictionary[neighbor]['ids'])
             
-            candidate_ids = torch.tensor(candidate_ids)
-            #print("candidates shape",candidate_ids.shape)
+            candidate_ids = torch.tensor(candidate_ids).to(device)
 
             target = [1] + [0] * (len(label_idxs)-1)
-            #print(len(target))
-            target = torch.tensor(target).unsqueeze(1)
             
-            context_embs, candidate_embs , scores = reranker(context_ids, candidate_ids, target) 
+            target = torch.tensor(target).unsqueeze(1).to(device)
+            
+            _, _ , scores = reranker(context_ids, candidate_ids) 
 
-            loss = F.cross_entropy(scores, target, reduction="mean") 
+            loss = F.cross_entropy(scores, target, reduction="mean")
+            steps +=1 
+            if steps % 100 == 0:
+                print("step: {}, loss: {}".format(step, loss.item()))
             #print(loss.item())
-            tr_loss += loss.item()
+            if params['data_parallels']:
+                tr_loss += loss.mean().item()
+                
+                loss.mean().backward()
+            else:
+                tr_loss += loss.item()
+                loss.backward()
+            optimizer.step()
         batch_loss = tr_loss/len(train_dataloader)
         print("epoch:{}, average loss:{}".format(epoch_idx, batch_loss))
+        
+        
 
 if __name__ == "__main__":
 
@@ -104,20 +107,23 @@ if __name__ == "__main__":
     # Input data
     parser.add_argument(
         "--batch_size",
+        default="12",
         type=int,
-        required=True,
+        required=False,
     )
 
     parser.add_argument(
         "--output_path",
+        default="output",
         type=str,
-        required=True,
+        required=False,
     )
 
     parser.add_argument(
         "--epoch",
+        default=100,
         type=int,
-        required=True,
+        required=False,
     )
 
     parser.add_argument(
@@ -136,7 +142,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--bert_model",
-        default="/home/DAIR/hongcd/DAIR_Biomed/EL/arboEL/models/biobert-v1.1",
+        default="/share/project/biomed/hcd/arboEL/models/biobert-base-cased-v1.1",
         type=str,
         required=False,
     )
@@ -151,6 +157,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--debug",
         type=bool,
+        default = False,
+        required=False,
+    )
+    
+    parser.add_argument(
+        "--data_parallel",
+        type=bool,
+        default=False,
         required=False,
     )
 
