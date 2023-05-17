@@ -275,7 +275,6 @@ def main(params):
             correct, correct_5 = calculate_top1_5(ordered_labels, correct, correct_5)
             
             loss = loss/gradient_accumulation_steps
-
             
             if params['data_parallel']:
                 loss.mean().backward()
@@ -340,9 +339,7 @@ def main(params):
 
     writer.flush()
     writer.close()
-    
-    
-    
+       
 def eval_test(params):
     print("evaluating")
     reranker = Reranker(params)
