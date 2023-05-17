@@ -14,7 +14,7 @@ def create_dictionary():
             entity["type"] = "chemical"
             entities.append(entity)
     
-    with open('./data/bc5cdr-c/entity_documents.json','w') as f:
+    with open('./data/bc5cdr-c_v1/entity_documents.json','w') as f:
         for  entity in entities:
             json.dump(entity,f)
             f.write("\n")
@@ -50,17 +50,19 @@ def create_mentions():
                 line = json.loads(line.strip())
                 for mention in line:
                     document_id = mention['content_document_id'].split('_')[0]
+                    mention_id = mention['mention_id']
                     start = mention['start_index']
                     end = mention['end_index']
                     context_left = documents[document_id][:start]
                     context_right = documents[document_id][end+1:]
-                    mentions.append({'mention': mention['text'],'context_left':context_left,'context_right':context_right,'context_doc_id':document_id,'type':'chemical','label_id':mention['label_candidate_id'],'label':mention['text']})
+                    mentions.append({'mention_id':mention_id,'mention': mention['text'],'context_left':context_left,'context_right':context_right,'context_doc_id':document_id,'type':'chemical','label_id':mention['label_candidate_id'],'label':mention['text']})
                 #print(line)
         if split == 'dev':
             split = 'val'
-        with open('./data/bc5cdr-c/processed/'+split+'.jsonl','w') as f:
+        with open('./data/bc5cdr-c_v1/processed/'+split+'.jsonl','w') as f:
+            print('in here')
             for mention in mentions:
                 json.dump(mention,f)
                 f.write('\n')
-#create_mentions()
+create_mentions()
 create_dictionary()

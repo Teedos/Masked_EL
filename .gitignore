@@ -7,7 +7,8 @@ data
 processed
 */processed/*
 
-
+model_ckpts
+*/model_ckpts/*
 
 # trained models
 models
