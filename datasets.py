@@ -39,3 +39,26 @@ class UMLSKGDataset(Dataset):
         negative_sample = torch.LongTensor([head, relation, corrupt_tail])
 
         return torch.LongTensor(self.triples[idx]), negative_sample
+    
+
+class PretrainDataset(Dataset):
+    def __init__(self, name_ids, name_attn_mask, definition_ids, definition_attn_mask, index_tensor):
+        #self.cuis = cui_list
+        self.name_ids = name_ids  # Initialize the name_ids attribute
+        self.definition_ids = definition_ids
+        self.name_attn_mask = name_attn_mask
+        self.definition_attn_mask = definition_attn_mask
+        self.indexes = index_tensor
+
+    def __len__(self):
+        return len(self.name_ids)
+
+    def __getitem__(self, index):
+        #cui = self.cuis[index]
+        names = self.name_ids[index]
+        definition_ids = self.definition_ids[index]
+        name_masks = self.name_attn_mask[index]
+        definition_masks = self.definition_attn_mask[index]
+        idxs = self.indexes[index]
+        return  names,name_masks, definition_ids, definition_masks, idxs
+    

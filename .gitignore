@@ -20,6 +20,11 @@ models
 output
 */output/*
 
+logs 
+*/logs/*
+
+runs
+*/output/*
 ### JupyterNotebooks ###
 # gitignore template for Jupyter Notebooks
 # website: http://jupyter.org/

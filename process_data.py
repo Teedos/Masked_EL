@@ -35,12 +35,13 @@ def get_context_representation(sample, tokenizer, split = None, max_length = 512
     context_left = sample['context_left']
     context_right = sample['context_right']
     mention_tokens = tokenizer.tokenize(mention)
-    masked_mention = [ENT_START_TAG] + ["[MASK]"] * len(mention_tokens) + [ENT_END_TAG]
+    #masked_mention = [ENT_START_TAG] + ["[MASK]"] * len(mention_tokens) + [ENT_END_TAG]
     context_left = tokenizer.tokenize(context_left)
     context_right = tokenizer.tokenize(context_right)
     
-    left_quota = (max_length - len(masked_mention)) // 2 - 1
-    right_quota = max_length - len(masked_mention) - left_quota - 2
+    left_quota = (max_length - len(mention_tokens)) // 2 - 1
+    right_quota = max_length - len(mention_tokens) - left_quota - 2
+    
     left_add = len(context_left)
     right_add = len(context_right)
 
@@ -50,17 +51,11 @@ def get_context_representation(sample, tokenizer, split = None, max_length = 512
     else:
         if len(context_right) <= right_quota:
             left_quota += right_quota - right_add
-    if split is not None:  
-        #print("Not masking")
-        context_tokens = (
-            context_left[-left_quota:] + masked_mention + context_right[:right_quota]
-        )
-    else:
-        context_tokens = (
-            context_left[-left_quota:] + mention_tokens + context_right[:right_quota]
-        )
     
-     
+    context_tokens = (
+        context_left[-left_quota:] + mention_tokens + context_right[:right_quota]
+    )
+    
     context_tokens = ["[CLS]"] + context_tokens + ["[SEP]"]
     
     input_ids = tokenizer.convert_tokens_to_ids(context_tokens)

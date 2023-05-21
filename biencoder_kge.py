@@ -15,11 +15,14 @@ class BiEncoderModule(torch.nn.Module):
         self.candidate_config.max_position_embeddings = 25
         self.context_encoder = BertModel.from_pretrained(params["bert_model"]) # Could be a path containing config.json and pytorch_model.bin; or could be an id shorthand for a model that is loaded in the library
         self.candidate_encoder = BertModel(self.candidate_config)
-
+        self.linear = torch.nn.Linear(1024, 768)
+        self.relu = torch.nn.ReLU()
+        self.dropout = torch.nn.Dropout(p=0.5)
     def forward(
         self,
         context_ids = None,
-        candidate_ids = None
+        candidate_ids = None,
+
     ):
         context_embedding = None
         if context_ids is not None:
@@ -46,15 +49,15 @@ class KG_Encoder(torch.nn.Module):
         self.embedding_layer = torch.nn.Linear(self.emb_size, self.output_size)
     def build_model(self):
         print("building kg encoder")
-        model_state_dict = torch.load('/share/project/biomed/hcd/Masked_EL/model_ckpts/transE/best_model.pt') 
+        model_state_dict = torch.load('/data/hcd/work_dir/Masked_EL/models/transE/best_model.pt') 
         self.model.load_state_dict(model_state_dict['model'])
     
-    def forward(self, embeddings):
-        #embeddings = embeddings.long()
-        embeddings.detach()
-        embs = self.embedding_layer(embeddings)
-        embs = torch.relu(embs)
-        return embs
+    # def forward(self, embeddings):
+    #     #embeddings = embeddings.long()
+    #     embeddings.detach()
+    #     embs = self.embedding_layer(embeddings)
+    #     embs = torch.relu(embs)
+    #     return embs
     
 class Reranker(torch.nn.Module):
     def __init__(self, params, path=None):
@@ -69,10 +72,10 @@ class Reranker(torch.nn.Module):
             print("building modellll")
             self.build_model()
         self.bert_size = 768
-        self.kg_size = 128
+        self.kg_size = 256
         self.emb_size = self.bert_size + self.kg_size
         
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr = self.params['learning_rate']*self.params['gradient_accumulation_steps'])    
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr = self.params['learning_rate']*self.params['gradient_accumulation_steps'],weight_decay=WEIGHT_DECAY)    
         if params['contrastive']:
             self.linear_layer = torch.nn.Linear(2*self.emb_size, 1).to(self.device)  #### learnable linear layer
             
@@ -93,10 +96,13 @@ class Reranker(torch.nn.Module):
         _, candidate_embedding = self.model(candidate_ids=candidate_ids)
         return candidate_embedding
     
-    def encode_kg_entity(self, kg_embeddings):
-        updated_kg_embeddings = self.kg_encoder(kg_embeddings)
-        return updated_kg_embeddings
+    def encode_concat(self, concatenated_embedding):
+        out = self.model.linear(concatenated_embedding)
+        out = self.model.dropout(out)
+        out = self.model.relu(out)
+        return out
     
+
     def forward(self, context_ids, candidate_ids, batch_mesh_ids, mesh2cui, cui2idx, device):
         batch_kg_embeddings = []
         covered = 0
@@ -121,10 +127,11 @@ class Reranker(torch.nn.Module):
                     not_covered +=1
                     entity_embeddings = self.kg_encoder.entity_embeddings.weight.data
                     embs.append(torch.mean(entity_embeddings, dim = 0))
+            
             batch_kg_embeddings.append(torch.stack(embs))
-        batch_kg_embeddings = torch.stack(batch_kg_embeddings)
-        kg_emb = self.encode_kg_entity(batch_kg_embeddings)
-        kg_emb.to(device)
+        kg_emb = torch.stack(batch_kg_embeddings)
+        #kg_emb = self.encode_kg_entity(batch_kg_embeddings)
+        #kg_emb.to(device)
         b, n, s = candidate_ids.shape          
         context_emb = self.encode_context(context_ids)  
         if context_emb.ndim == 1:
@@ -136,14 +143,74 @@ class Reranker(torch.nn.Module):
         candidate_emb = self.encode_candidate(candidate_ids)   
         candidate_emb = candidate_emb.reshape(b, n, self.bert_size)
         concatenated_candidate = torch.cat((candidate_emb, kg_emb), dim=-1)
+
+        candidate_final_embedding = self.encode_concat(concatenated_candidate)
+
+        context_final_embedding = self.encode_concat(concatenated_context)
         if self.params['pairwise']:
             dot_product_scores = torch.bmm(candidate_emb,context_emb).squeeze(-1)
             norm_product = torch.norm(candidate_emb, dim=-1) * torch.norm(torch.transpose(context_emb, 1, 2), dim=-1)
             cosine_similarity_scores = dot_product_scores / norm_product
             scores = self.linear_layer(torch.cat((dot_product_scores.unsqueeze(-1), cosine_similarity_scores.unsqueeze(-1)), dim=-1)).squeeze(-1)
         else:
-            scores = torch.bmm(concatenated_candidate, concatenated_context.transpose(1,2)) 
+            context_reshaped = context_final_embedding.view(b * n, 768)
+            candidate_reshaped = candidate_final_embedding.view(b * n, 768)
+
+            scores = torch.bmm(context_reshaped.unsqueeze(1), candidate_reshaped.unsqueeze(2)).squeeze()
+
+            scores = scores.view(b, n)
+            #scores = torch.bmm(candidate_final_embedding, context_final_embedding.transpose(1,2)) 
         return  scores
+        #return context_reshaped, candidate_reshaped
+
+
+    # def forward(self, context_ids, candidate_ids, batch_mesh_ids, mesh2cui, cui2idx, device):
+    #     batch_kg_embeddings = []
+    #     covered = 0
+    #     not_covered = 0
+    #     for row in batch_mesh_ids:
+    #         #batch_kg_embeddings.append()
+    #         embs = []
+    #         for mesh in row:
+    #             if mesh in mesh2cui:
+    #                 cui = mesh2cui[mesh]
+    #                 if cui in cui2idx:
+    #                     covered +=1
+    #                     kg_idx = cui2idx[cui]
+    #                     kg_emb = self.kg_encoder.entity_embeddings(torch.tensor(kg_idx).to(device))   
+    #                     #batch_kg_embeddings[-1].append(kg_emb)
+    #                     embs.append(kg_emb)
+    #                 else:
+    #                     not_covered +=1
+    #                     entity_embeddings = self.kg_encoder.entity_embeddings.weight.data
+    #                     embs.append(torch.mean(entity_embeddings, dim = 0))
+    #             else:
+    #                 not_covered +=1
+    #                 entity_embeddings = self.kg_encoder.entity_embeddings.weight.data
+    #                 embs.append(torch.mean(entity_embeddings, dim = 0))
+    #         batch_kg_embeddings.append(torch.stack(embs))
+    #     batch_kg_embeddings = torch.stack(batch_kg_embeddings)
+    #     kg_emb = self.encode_kg_entity(batch_kg_embeddings)
+    #     kg_emb.to(device)
+    #     b, n, s = candidate_ids.shape          
+    #     context_emb = self.encode_context(context_ids)  
+    #     if context_emb.ndim == 1:
+    #         context_emb = context_emb.unsqueeze(0)
+    #     context_emb = context_emb.unsqueeze(1).repeat(1, n, 1)    
+    #     concatenated_context = torch.cat([context_emb, kg_emb], dim=2)
+        
+    #     candidate_ids = candidate_ids.reshape(b * n, s) 
+    #     candidate_emb = self.encode_candidate(candidate_ids)   
+    #     candidate_emb = candidate_emb.reshape(b, n, self.bert_size)
+    #     concatenated_candidate = torch.cat((candidate_emb, kg_emb), dim=-1)
+    #     if self.params['pairwise']:
+    #         dot_product_scores = torch.bmm(candidate_emb,context_emb).squeeze(-1)
+    #         norm_product = torch.norm(candidate_emb, dim=-1) * torch.norm(torch.transpose(context_emb, 1, 2), dim=-1)
+    #         cosine_similarity_scores = dot_product_scores / norm_product
+    #         scores = self.linear_layer(torch.cat((dot_product_scores.unsqueeze(-1), cosine_similarity_scores.unsqueeze(-1)), dim=-1)).squeeze(-1)
+    #     else:
+    #         scores = torch.bmm(concatenated_candidate, concatenated_context.transpose(1,2)) 
+    #     return  scores
         
         
 class PairwiseRankingLoss(torch.nn.Module):
